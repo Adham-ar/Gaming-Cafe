@@ -1,0 +1,66 @@
+def show_main_layout(username, user_id):
+    # 1. THE MAIN CONTAINER
+    # This frame will hold everything on the main page
+    main_container = tkinter.Frame(window, bg=bg_color)
+    main_container.pack(expand=True, fill="both")
+
+    # 2. THE NAVBAR (Top Section)
+    navbar = tkinter.Frame(main_container, bg="#202225", height=50) # Darker gray for contrast
+    navbar.pack(side="top", fill="x")
+
+    user_label = tkinter.Label(
+        navbar, text=f"Logged in as: {username}", bg="#202225", fg=sec_color,
+        font=("Arial", 10, "bold")
+    )
+    user_label.pack(side="left", padx=20, pady=10)
+
+    logout_button = tkinter.Button(
+        navbar, text="Logout", bg="#f04747", fg="white", font=("Arial", 10),
+        command=lambda: [main_container.destroy(), show_login_page()],
+        relief="flat", padx=10
+    )
+    logout_button.pack(side="right", padx=20, pady=10)
+
+    # Assuming your User model has an 'is_admin' boolean
+    if user_id == 1:
+        insights_btn = tkinter.Button(
+            navbar,
+            text="Insights",
+            bg="#202225",
+            fg="white",
+            relief="flat",
+            command=lambda: show_insights_page(content_area, user_id)
+        )
+        insights_btn.pack(side="right", padx=10, pady=10)
+
+    # 3. THE CONTENT AREA (Middle Section)
+    # This is where your actual app data goes
+    content_area = tkinter.Frame(main_container, bg=bg_color)
+    content_area.pack(expand=True, fill="both", padx=20, pady=20)
+
+    # Track grid positions
+    # We use a simple list or dictionary to keep track of the count
+    grid_data = {"count": 0, "max_columns": 8}
+
+    # LOAD EXISTING ITEMS FROM DB
+    session = Session()
+    existing_items = session.query(Item).all()
+    session.close()
+
+    # Draw existing items first
+    for item in existing_items:
+        # We pass None for plus_button here because we don't need to move it yet
+        draw_item_card(content_area, grid_data, None, item.label, item.id)
+
+    # ONLY SHOW ADD BUTTON IF ADMIN (ID 1)
+    if user_id == 1:
+        plus_button = tkinter.Button(
+            content_area, text="+", bg=sec_color, fg="white",
+            font=("Arial", 18, "bold"), width=3, height=1, relief="flat"
+        )
+        plus_button.config(command=lambda: add_item_logic(content_area, grid_data, plus_button, user_id))
+
+        # Position it at the end of the loaded items
+        row = grid_data["count"] // grid_data["max_columns"]
+        col = grid_data["count"] % grid_data["max_columns"]
+        plus_button.grid(row=row, column=col, padx=10, pady=10)
