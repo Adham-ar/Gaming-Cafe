@@ -1,6 +1,6 @@
 import tkinter
-from functions import handle_login, register_user, add_item_logic, draw_item_card
-from database import Session, Item, Pricing, User
+from functions import (handle_login, register_user, add_item_logic, draw_item_card, get_pricing_rate, update_pricing_rate, get_all_drinks, commit_new_drink, commit_delete_drink,)
+from database import Session, Item, Pricing, User, Drinks, ConsoleOrder
 
 bg_color = "#424549"
 sec_color = "#7289da"
@@ -48,79 +48,127 @@ def show_login_page():
 
 
 def show_insights_page(content_area, user_id, username):
-    # Clear the previous page
+    # Clear the previous page entirely
     for widget in content_area.winfo_children():
         widget.destroy()
 
+    # --- SCROLLABLE WRAPPER INFRASTRUCTURE ---
+    container = tkinter.Frame(content_area, bg=bg_color)
+    container.pack(fill="both", expand=True)
+
+    canvas = tkinter.Canvas(container, bg=bg_color, highlightthickness=0)
+    canvas.pack(side="left", fill="both", expand=True)
+
+    scrollbar = tkinter.Scrollbar(container, orient="vertical", command=canvas.yview)
+    scrollbar.pack(side="right", fill="y")
+
+    canvas.configure(yscrollcommand=scrollbar.set)
+    scrollable_frame = tkinter.Frame(canvas, bg=bg_color)
+
+    scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+    canvas_frame_id = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+    canvas.bind("<Configure>", lambda e: canvas.itemconfig(canvas_frame_id, width=e.width))
+    canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-1 * (e.delta / 120)), "units"))
+
     # --- BACK BUTTON ---
-    # We pack this into its own frame to keep it aligned to the left
-    top_frame = tkinter.Frame(content_area, bg="#2c2f33")
+    top_frame = tkinter.Frame(scrollable_frame, bg="#2c2f33")
     top_frame.pack(fill="x", padx=20, pady=10)
 
-    back_btn = tkinter.Button(
-        top_frame,
-        text="← Back",
-        bg="#2c2f33",
-        fg="#7289da",  # Discord-style blue for the link look
-        font=("Arial", 10, "bold"),
-        relief="flat",
-        cursor="hand2",
-        # This calls your main dashboard function
-        command=lambda: show_dashboard_grid(content_area, user_id, username)
-    )
-    back_btn.pack(side="left")
+    def go_back():
+        canvas.unbind_all("<MouseWheel>")
+        show_dashboard_grid(content_area, user_id, username)
 
-    tkinter.Label(content_area, text="PRICING SETTINGS", bg=bg_color, fg="white", font=("Arial", 18, "bold")).pack(
-        pady=20)
+    tkinter.Button(
+        top_frame, text="← Back", bg="#2c2f33", fg="#7289da",
+        font=("Arial", 10, "bold"), relief="flat", cursor="hand2", command=go_back
+    ).pack(side="left")
 
-    # Container for the table
-    table_frame = tkinter.Frame(content_area, bg=bg_color)
+    tkinter.Label(scrollable_frame, text="PRICING SETTINGS", bg=bg_color, fg="white",
+                  font=("Arial", 18, "bold")).pack(pady=20)
+
+    # --- CONSOLE PRICING GRID ---
+    table_frame = tkinter.Frame(scrollable_frame, bg=bg_color)
     table_frame.pack(pady=10)
 
-    # Header Row
     tkinter.Label(table_frame, text="Category", width=20, bg=bg_color, fg="#b9bbbe").grid(row=0, column=0, padx=1,
-                                                                                           pady=1)
+                                                                                          pady=1)
     tkinter.Label(table_frame, text="Price per Hour ($)", width=20, bg=bg_color, fg="#b9bbbe").grid(row=0, column=1,
-                                                                                                     padx=1, pady=1)
+                                                                                                    padx=1, pady=1)
     tkinter.Label(table_frame, text="Action", width=15, bg=bg_color, fg="#b9bbbe").grid(row=0, column=2, padx=1,
-                                                                                         pady=1)
+                                                                                        pady=1)
 
     categories = [("PS 4", "Single"), ("PS 4", "Multi"), ("PS 5", "Single"), ("PS 5", "Multi")]
 
     for i, (console, mode) in enumerate(categories):
         cat_key = f"{console}_{mode}"
+        current_val = get_pricing_rate(cat_key)  # <-- Logic Call
 
-        # Get current price from DB
-        session = Session()
-        record = session.query(Pricing).filter_by(category=cat_key).first()
-        current_val = record.price_per_hour if record else 10.0
-        session.close()
-
-        # UI Row
         tkinter.Label(table_frame, text=cat_key, bg=bg_color, fg="white").grid(row=i + 1, column=0, pady=5)
 
         price_entry = tkinter.Entry(table_frame, bg="#4f545c", fg="white", insertbackground="white", width=15)
         price_entry.insert(0, f"{current_val:.2f}")
         price_entry.grid(row=i + 1, column=1, pady=5)
 
-        # Save function for this specific row
-        def save_price(k=cat_key, e=price_entry):
-            try:
-                new_price = float(e.get())
-                session = Session()
-                item = session.query(Pricing).filter_by(category=k).first()
-                if item:
-                    item.price_per_hour = new_price
-                else:
-                    session.add(Pricing(category=k, price_per_hour=new_price))
-                session.commit()
-                session.close()
-                tkinter.messagebox.showinfo("Success", f"Price for {k} updated!")
-            except ValueError:
-                tkinter.messagebox.showerror("Error", "Please enter a valid number.")
+        tkinter.Button(
+            table_frame, text="SAVE", bg="#7289da", fg="white",
+            command=lambda k=cat_key, e=price_entry: update_pricing_rate(k, e.get())  # <-- Logic Call
+        ).grid(row=i + 1, column=2, padx=10)
 
-        tkinter.Button(table_frame, text="SAVE", bg="#7289da", fg="white", command=save_price).grid(row=i + 1, column=2,
-                                                                                                    padx=10)
+    # --- DIVIDER ---
+    tkinter.Frame(scrollable_frame, height=2, bg="#4f545c").pack(fill="x", padx=40, pady=25)
+
+    # --- DRINK INVENTORY MANAGEMENT ---
+    tkinter.Label(scrollable_frame, text="DRINK INVENTORY MANAGEMENT", bg=bg_color, fg="white",
+                  font=("Arial", 16, "bold")).pack(pady=5)
+
+    form_frame = tkinter.Frame(scrollable_frame, bg=bg_color)
+    form_frame.pack(pady=10)
+
+    tkinter.Label(form_frame, text="Drink Name:", bg=bg_color, fg="white", font=("Arial", 10)).grid(row=0, column=0,
+                                                                                                    padx=5)
+    name_entry = tkinter.Entry(form_frame, bg="#4f545c", fg="white", insertbackground="white", width=15)
+    name_entry.grid(row=0, column=1, padx=5)
+
+    tkinter.Label(form_frame, text="Price ($):", bg=bg_color, fg="white", font=("Arial", 10)).grid(row=0, column=2,
+                                                                                                   padx=5)
+    price_entry = tkinter.Entry(form_frame, bg="#4f545c", fg="white", insertbackground="white", width=8)
+    price_entry.grid(row=0, column=3, padx=5)
+
+    def handle_add_drink():
+        if commit_new_drink(name_entry.get(), price_entry.get()):  # <-- Logic Call
+            show_insights_page(content_area, user_id, username)
+
+    tkinter.Button(
+        form_frame, text="ADD DRINK", bg="#43b581", fg="white", font=("Arial", 9, "bold"), command=handle_add_drink
+    ).grid(row=0, column=4, padx=10)
+
+    # --- DRINK INVENTORY TABLE ---
+    drink_table_frame = tkinter.Frame(scrollable_frame, bg=bg_color)
+    drink_table_frame.pack(pady=10)
+
+    tkinter.Label(drink_table_frame, text="Item Name", width=20, bg=bg_color, fg="#b9bbbe").grid(row=0, column=0,
+                                                                                                 padx=1, pady=1)
+    tkinter.Label(drink_table_frame, text="Price ($)", width=20, bg=bg_color, fg="#b9bbbe").grid(row=0, column=1,
+                                                                                                 padx=1, pady=1)
+    tkinter.Label(drink_table_frame, text="Action", width=15, bg=bg_color, fg="#b9bbbe").grid(row=0, column=2,
+                                                                                              padx=1, pady=1)
+
+    def handle_delete_drink(d_id):
+        if commit_delete_drink(d_id):  # <-- Logic Call
+            show_insights_page(content_area, user_id, username)
+
+    all_drinks = get_all_drinks()  # <-- Logic Call
+    for idx, drink in enumerate(all_drinks):
+        tkinter.Label(drink_table_frame, text=drink.name, bg=bg_color, fg="white").grid(row=idx + 1, column=0,
+                                                                                        pady=5)
+        tkinter.Label(drink_table_frame, text=f"${drink.price:.2f}", bg=bg_color, fg="#43b581").grid(row=idx + 1,
+                                                                                                     column=1,
+                                                                                                     pady=5)
+
+        tkinter.Button(
+            drink_table_frame, text="DELETE", bg="#f04747", fg="white",
+            command=lambda d_id=drink.id: handle_delete_drink(d_id)
+        ).grid(row=idx + 1, column=2, padx=10)
 
 
 # --- PAGE 2: MAIN PAGE ---

@@ -1,4 +1,4 @@
-from database import Session, User, Item, Pricing
+from database import Session, User, Item, Pricing, Drinks, ConsoleOrder
 from tkinter import messagebox
 import tkinter
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -333,4 +333,73 @@ def draw_item_card(content_area, grid_data, plus_button, text, item_id):
         new_col = grid_data["count"] % grid_data["max_columns"]
         plus_button.grid(row=new_row, column=new_col)
 
+def get_pricing_rate(cat_key):
+    """Fetches the hourly rate for a specific console category."""
+    session = Session()
+    record = session.query(Pricing).filter_by(category=cat_key).first()
+    current_val = record.price_per_hour if record else 0.0
+    session.close()
+    return current_val
 
+def update_pricing_rate(cat_key, price_str):
+    """Validates and updates the hourly rate for a console category."""
+    try:
+        new_price = float(price_str)
+        session = Session()
+        item = session.query(Pricing).filter_by(category=cat_key).first()
+        if item:
+            item.price_per_hour = new_price
+        else:
+            session.add(Pricing(category=cat_key, price_per_hour=new_price))
+        session.commit()
+        session.close()
+        tkinter.messagebox.showinfo("Success", f"Price for {cat_key} updated!")
+        return True
+    except ValueError:
+        tkinter.messagebox.showerror("Error", "Please enter a valid number.")
+        return False
+
+def get_all_drinks():
+    """Fetches all items from the drink inventory."""
+    session = Session()
+    all_drinks = session.query(Drinks).all()
+    session.close()
+    return all_drinks
+
+def commit_new_drink(name, price_str):
+    """Validates and commits a new drink item to the inventory."""
+    if not name or not price_str:
+        tkinter.messagebox.showerror("Error", "Please fill out both fields.")
+        return False
+
+    try:
+        clean_price_str = price_str.replace('$', '').strip()
+        price = float(clean_price_str)
+    except ValueError:
+        tkinter.messagebox.showerror("Error", "Price must be a valid number (e.g., 2.50).")
+        return False
+
+    session = Session()
+    existing = session.query(Drinks).filter_by(name=name).first()
+    if existing:
+        tkinter.messagebox.showerror("Error", f"'{name}' already exists in inventory.")
+        session.close()
+        return False
+
+    new_drink = Drinks(name=name, price=round(price, 2))
+    session.add(new_drink)
+    session.commit()
+    session.close()
+    return True
+
+def commit_delete_drink(drink_id):
+    """Deletes a selected drink item from the inventory."""
+    if tkinter.messagebox.askyesno("Confirm", "Are you sure you want to delete this item?"):
+        session = Session()
+        drink = session.query(Drinks).get(drink_id)
+        if drink:
+            session.delete(drink)
+            session.commit()
+        session.close()
+        return True
+    return False

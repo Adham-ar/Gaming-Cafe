@@ -1,5 +1,5 @@
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, Boolean, Float
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 from sqlalchemy import ForeignKey
 from datetime import datetime
 
@@ -29,7 +29,27 @@ class Pricing(Base):
     __tablename__ = 'pricing'
     id = Column(Integer, primary_key=True)
     category = Column(String, unique=True)
-    price_per_hour = Column(Float, default=10.0)
+    price_per_hour = Column(Float, default=00.0)
+
+class Drinks(Base):
+    __tablename__ = 'drinks'
+    id = Column(Integer, primary_key=True)
+    name = Column(Integer, nullable=False, unique=True)
+    price = Column(Float, nullable=False)
+
+    orders = relationship("ConsoleOrder", back_populates="drink", cascade="all, delete-orphan")
+
+
+class ConsoleOrder(Base):
+    __tablename__ = 'console_orders'
+    id = Column(Integer, primary_key=True)
+    item_id = Column(Integer, ForeignKey('items.id'), nullable=False) # Which console ordered it
+    drink_id = Column(Integer, ForeignKey('drinks.id'), nullable=False) # Which drink did they buy
+    quantity = Column(Integer, default=1, nullable=False)
+
+    drink = relationship("Drinks", back_populates="orders")
+    item = relationship("Item")
+
 
 # Create the .db file and table
 Base.metadata.create_all(engine)
