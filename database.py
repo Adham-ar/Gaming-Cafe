@@ -21,8 +21,8 @@ class Item(Base):
 
     start_time = Column(DateTime, nullable=True)
     is_running = Column(Boolean, default=False)
-    is_paused = Column(Boolean, default=False)
-    pause_start = Column(DateTime, nullable=True)  # NEW: When did the pause begin?
+    console_type = Column(String, default="PS 4")
+    player_mode = Column(String, default="Single")
 
 
 class Pricing(Base):

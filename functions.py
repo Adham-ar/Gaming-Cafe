@@ -81,10 +81,15 @@ def open_details_window(item_id, main_img_label):
     # Set the title dynamically based on the item label
     if item:
         details_window.title(f"Managing: {item.label}")
+        saved_console = item.console_type if item.console_type else "PS 4"
+        saved_mode = item.player_mode if item.player_mode else "Single"
     else:
         details_window.title("Unknown Console")
+        saved_console = "PS 4"
+        saved_mode = "Single"
 
-    session.close()  # Close the temporary session used for the title
+    session.close() # Close the temporary session used for the title
+
     details_window.geometry("800x500")
     details_window.configure(bg="#2c2f33")
 
@@ -92,8 +97,8 @@ def open_details_window(item_id, main_img_label):
     state = {"window_active": True}
 
     # --- DATA VARIABLES ---
-    choice_console = tkinter.StringVar(value="PS 4")
-    choice_mode = tkinter.StringVar(value="Single")
+    choice_console = tkinter.StringVar(value=saved_console)
+    choice_mode = tkinter.StringVar(value=saved_mode)
 
     # --- UI: TIMER LABEL ---
     timer_label = tkinter.Label(
@@ -154,8 +159,8 @@ def open_details_window(item_id, main_img_label):
         selection_buttons.append(btn)
 
     # Initialize first selection
-    set_selection(choice_console, "PS 4", console_btns)
-    set_selection(choice_mode, "Single", mode_btns)
+    set_selection(choice_console, saved_console, console_btns)
+    set_selection(choice_mode, saved_mode, mode_btns)
 
     # --- SECTION 3: TIMER LOGIC ---
     def refresh_ui():
@@ -165,21 +170,17 @@ def open_details_window(item_id, main_img_label):
         session = Session()
         item = session.query(Item).get(item_id)
 
-        if item and item.is_running:
-            if item.is_paused:
-                # Freeze UI colors to show it's stopped
-                timer_label.config(fg="#f1c40f")
-                bill_label.config(fg="#f1c40f")
-            else:
-                # Run the clock normally
-                elapsed = datetime.now() - item.start_time
-                seconds = int(elapsed.total_seconds())
+        if item and item.is_running and item.start_time:
+            elapsed = datetime.now() - item.start_time
+            seconds = int(elapsed.total_seconds())
 
-                h, m, s = seconds // 3600, (seconds % 3600) // 60, seconds % 60
-                timer_label.config(text=f"{h:02}:{m:02}:{s:02}", fg="#7ECB94")
+            h, m, s = seconds // 3600, (seconds % 3600) // 60, seconds % 60
+            timer_label.config(text=f"{h:02}:{m:02}:{s:02}", fg="#7ECB94")
 
-                current_price = calculate_bill(seconds, choice_console.get(), choice_mode.get())
-                bill_label.config(text=f"Current Bill: ${current_price:.2f}", fg="#43b581")
+            current_price = calculate_bill(seconds, choice_console.get(), choice_mode.get())
+            bill_label.config(text=f"Current Bill: ${current_price:.2f}", fg="#43b581")
+
+            main_img_label.config(image=main_img_label.active_photo)
 
         session.close()
         timer_label.after(1000, refresh_ui)
@@ -190,7 +191,10 @@ def open_details_window(item_id, main_img_label):
         if item:
             item.start_time = datetime.now()
             item.is_running = True
-            item.is_paused = False
+            # SAVE CURRENT CHOICES TO THE DB
+            item.console_type = choice_console.get()
+            item.player_mode = choice_mode.get()
+
             session.commit()
 
             # LOCK UI: Can't change console/mode once started
@@ -201,68 +205,41 @@ def open_details_window(item_id, main_img_label):
             final_bill_label.config(text="")
         session.close()
 
-    def toggle_pause():
-        session = Session()
-        item = session.query(Item).get(item_id)
-
-        if item and item.is_running:
-            if not item.is_paused:
-                # --- ACTION: PAUSE ---
-                item.is_paused = True
-                item.pause_start = datetime.now()  # Mark the moment pause began
-                pause_btn.config(text="RESUME", bg="#7289da")
-            else:
-                # --- ACTION: RESUME ---
-                # Calculate how long they were paused
-                pause_duration = datetime.now() - item.pause_start
-
-                # SHIFT the start_time forward by that duration
-                # This "forgives" the paused time so it doesn't count
-                item.start_time = item.start_time + pause_duration
-
-                item.is_paused = False
-                item.pause_start = None  # Clear the pause timestamp
-                pause_btn.config(text="PAUSE", bg="#faa61a")
-
-            session.commit()
-        session.close()
-
     def calculate_bill(duration_seconds, console_type, mode):
         session = Session()
         # Construct the key based on selections (e.g., "PS 5_Multi")
         key = f"{console_type}_{mode}"
 
         pricing_rule = session.query(Pricing).filter_by(category=key).first()
-        rate = pricing_rule.price_per_hour if pricing_rule else 10.0  # Default if not set
+        rate = pricing_rule.price_per_hour if pricing_rule else 00.0  # Default if not set
 
         # Calculate: (rate / 3600 seconds) * actual seconds played
         total_price = (rate / 3600) * duration_seconds
         session.close()
-
         return round(total_price, 2)
 
     def stop_timer():
-        if messagebox.askyesno("Confirm", "Stop session and calculate total?"):
-            session = Session()
-            item = session.query(Item).get(item_id)
+        session = Session()
+        item = session.query(Item).get(item_id)
 
-            if item and item.is_running:
-                # Calculate final time
-                elapsed = datetime.now() - item.start_time
-                total_seconds = int(elapsed.total_seconds())
-                # Get selections from our toggle variables
-                final_price = calculate_bill(total_seconds, choice_console.get(), choice_mode.get())
+        if item and item.is_running:
+            # Calculate total up to this exact millisecond
+            elapsed = datetime.now() - item.start_time
+            total_seconds = int(elapsed.total_seconds())
+            final_price = calculate_bill(total_seconds, item.console_type, item.player_mode)
 
-                # Update the label on the details window
-                final_bill_label.config(text=f"FINAL RECEIPT: ${final_price:.2f}")
+            # Put it on the text options
+            timer_label.config(fg="#f04747")  # Turn red to visually show it's frozen
+            final_bill_label.config(text=f"FINAL RECEIPT: ${final_price:.2f}")
 
-                item.is_running = False
-                session.commit()
+            # Commit stop status to DB so background checkers know it's off
+            item.is_running = False
+            session.commit()
 
-                # UNLOCK UI: Ready for next customer
-                for btn in selection_buttons:
-                    btn.config(state="normal")
-            session.close()
+            # UNLOCK UI selection fields for the next round
+            for btn in selection_buttons:
+                btn.config(state="normal")
+        session.close()
 
     # --- AUTO-LOCK IF ALREADY RUNNING ---
     session = Session()
@@ -278,11 +255,6 @@ def open_details_window(item_id, main_img_label):
 
     tkinter.Button(ctrl_frame, text="START", bg="#43b581", fg="white", width=15, height=2,
                    font=("Arial", 11, "bold"), relief="flat", command=start_timer).pack(side="left", padx=10)
-
-    # Pause Button (We save this to a variable so toggle_pause can change its text)
-    pause_btn = tkinter.Button(ctrl_frame, text="PAUSE", bg="#faa61a", fg="white", width=12, height=2,
-                               font=("Arial", 11, "bold"), relief="flat", command=toggle_pause)
-    pause_btn.pack(side="left", padx=10)
 
     tkinter.Button(ctrl_frame, text="STOP", bg="#f04747", fg="white", width=15, height=2,
                    font=("Arial", 11, "bold"), relief="flat", command=stop_timer).pack(side="left", padx=10)
