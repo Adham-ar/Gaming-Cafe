@@ -3,6 +3,7 @@ from tkinter import messagebox
 import tkinter
 from werkzeug.security import generate_password_hash, check_password_hash
 from datetime import datetime
+from tkinter import ttk
 
 
 bg_color = "#424549"
@@ -74,6 +75,7 @@ def add_item_logic(content_area, grid_data, plus_button, user_id):
 def open_details_window(item_id, main_img_label):
     # Create the new window
     details_window = tkinter.Toplevel()
+
     # --- FETCH ITEM DATA FOR TITLE ---
     session = Session()
     item = session.query(Item).get(item_id)
@@ -88,9 +90,10 @@ def open_details_window(item_id, main_img_label):
         saved_console = "PS 4"
         saved_mode = "Single"
 
-    session.close() # Close the temporary session used for the title
+    session.close()  # Close the temporary session used for the title
 
-    details_window.geometry("800x500")
+    # Increased height slightly (from 500 to 680) to give room for the drinks UI elements comfortably
+    details_window.geometry("800x680")
     details_window.configure(bg="#2c2f33")
 
     # Use a dictionary to keep the flag mutable across functions
@@ -105,17 +108,17 @@ def open_details_window(item_id, main_img_label):
         details_window, text="00:00:00",
         bg="#2c2f33", fg="#7ECB94", font=("Arial", 30, "bold")
     )
-    timer_label.pack(pady=30)
+    timer_label.pack(pady=20)
 
     bill_label = tkinter.Label(
         details_window, text="Total Bill: 0.00",
         bg="#2c2f33", fg="#43b581", font=("Arial", 14, "bold")
     )
-    bill_label.pack(pady=10)
+    bill_label.pack(pady=5)
 
-    # NEW: The Final Bill Label (The "Receipt")
+    # The Final Bill Label (The "Receipt")
     final_bill_label = tkinter.Label(details_window, text="", bg="#2c2f33", fg="#f1c40f", font=("Arial", 16, "bold"))
-    final_bill_label.pack(pady=10)
+    final_bill_label.pack(pady=5)
 
     selection_buttons = []
 
@@ -131,7 +134,7 @@ def open_details_window(item_id, main_img_label):
     # --- SECTION 1: CONSOLE SELECTION ---
     tkinter.Label(details_window, text="SELECT CONSOLE", bg="#2c2f33", fg="#b9bbbe", font=("Arial", 9, "bold")).pack()
     console_frame = tkinter.Frame(details_window, bg="#2c2f33")
-    console_frame.pack(pady=10)
+    console_frame.pack(pady=5)
 
     console_btns = {}
     for text in ["PS 4", "PS 5"]:
@@ -146,9 +149,9 @@ def open_details_window(item_id, main_img_label):
 
     # --- SECTION 2: MODE SELECTION ---
     tkinter.Label(details_window, text="PLAYER MODE", bg="#2c2f33", fg="#b9bbbe", font=("Arial", 9, "bold")).pack(
-        pady=(15, 0))
+        pady=(10, 0))
     mode_frame = tkinter.Frame(details_window, bg="#2c2f33")
-    mode_frame.pack(pady=10)
+    mode_frame.pack(pady=5)
 
     mode_btns = {}
     for text in ["Single", "Multi"]:
@@ -158,9 +161,85 @@ def open_details_window(item_id, main_img_label):
         mode_btns[text] = btn
         selection_buttons.append(btn)
 
-    # Initialize first selection
+    # Initialize selections based on DB values
     set_selection(choice_console, saved_console, console_btns)
     set_selection(choice_mode, saved_mode, mode_btns)
+
+    # --- SECTION 2.5: DRINK ORDERS INTERFACE ---
+    tkinter.Label(details_window, text="ADD DRINKS TO TAB", bg="#2c2f33", fg="#b9bbbe", font=("Arial", 9, "bold")).pack(
+        pady=(15, 0))
+
+    drink_order_frame = tkinter.Frame(details_window, bg="#2c2f33")
+    drink_order_frame.pack(pady=5)
+
+    # Fetch available inventory from database
+    db_session = Session()
+    drink_menu_items = db_session.query(Drinks).all()
+    db_session.close()
+
+    drink_names = [f"{d.name} (${d.price:.2f})" for d in drink_menu_items]
+
+    drink_dropdown = ttk.Combobox(drink_order_frame, values=drink_names, state="readonly", width=25)
+    drink_dropdown.pack(side="left", padx=5)
+
+    # Force the dropdown to start completely empty
+    drink_dropdown.set("")
+
+    tkinter.Label(drink_order_frame, text="Qty:", bg="#2c2f33", fg="white").pack(side="left", padx=2)
+    qty_dropdown = ttk.Combobox(drink_order_frame, values=[1, 2, 3, 4, 5], state="readonly", width=3)
+    qty_dropdown.pack(side="left", padx=5)
+    qty_dropdown.current(0)
+
+    # Visual field summarizing orders currently placed on this session
+    active_orders_label = tkinter.Label(details_window, text="No drinks ordered yet.", bg="#2c2f33", fg="#b9bbbe",
+                                        font=("Arial", 10, "italic"))
+    active_orders_label.pack(pady=5)
+
+    def refresh_drink_list():
+        """Queries the database to update the string display of orders."""
+        session = Session()
+        orders = session.query(ConsoleOrder).filter_by(item_id=item_id).all()
+        if not orders:
+            active_orders_label.config(text="No drinks ordered yet.", fg="#b9bbbe", font=("Arial", 10, "italic"))
+            session.close()
+            return
+        summary_text = "Active Orders: " + " | ".join([f"{o.quantity}x {o.drink.name}" for o in orders])
+        active_orders_label.config(text=summary_text, fg="white", font=("Arial", 10, "bold"))
+        session.close()
+
+    def handle_add_drink_to_tab():
+        selected_index = drink_dropdown.current()
+        # Safeguard: prevent index lookups if no drink is chosen
+        if selected_index == -1 or drink_dropdown.get() == "":
+            return
+
+        drink_obj = drink_menu_items[selected_index]
+        quantity = int(qty_dropdown.get())
+
+        session = Session()
+        # Check if this exact drink has already been ordered on this session tab
+        existing_order = session.query(ConsoleOrder).filter_by(item_id=item_id, drink_id=drink_obj.id).first()
+
+        if existing_order:
+            existing_order.quantity += quantity
+        else:
+            new_order = ConsoleOrder(item_id=item_id, drink_id=drink_obj.id, quantity=quantity)
+            session.add(new_order)
+
+        session.commit()
+        session.close()
+
+        # Reset dropdown box to empty after saving, then refresh visual list
+        drink_dropdown.set("")
+        refresh_drink_list()
+
+    tkinter.Button(
+        drink_order_frame, text="+ Add", bg="#7289da", fg="white",
+        font=("Arial", 9, "bold"), relief="flat", command=handle_add_drink_to_tab
+    ).pack(side="left", padx=5)
+
+    # Load order list immediately on window popup load
+    refresh_drink_list()
 
     # --- SECTION 3: TIMER LOGIC ---
     def refresh_ui():
@@ -211,18 +290,36 @@ def open_details_window(item_id, main_img_label):
         key = f"{console_type}_{mode}"
 
         pricing_rule = session.query(Pricing).filter_by(category=key).first()
-        rate = pricing_rule.price_per_hour if pricing_rule else 00.0  # Default if not set
+        rate = pricing_rule.price_per_hour if pricing_rule else 0.0
 
-        # Calculate: (rate / 3600 seconds) * actual seconds played
-        total_price = (rate / 3600) * duration_seconds
+        # Calculate time cost: (rate / 3600 seconds) * actual seconds played
+        time_cost = (rate / 3600) * duration_seconds
+
+        # Calculate active drink tabs cost
+        drink_orders = session.query(ConsoleOrder).filter_by(item_id=item_id).all()
+        drinks_cost = sum([order.quantity * order.drink.price for order in drink_orders])
+
         session.close()
-        return round(total_price, 2)
+        return round(time_cost + drinks_cost, 2)
 
     def stop_timer():
         session = Session()
         item = session.query(Item).get(item_id)
 
         if item and item.is_running:
+            # --- THE POPUP CONFIRMATION ---
+            # It will return True if "Yes" is clicked, and False if "No" is clicked
+            confirm = messagebox.askyesno(
+                title="Confirm Stop",
+                message=f"Are you sure you want to stop the timer for {item.label}?"
+            )
+
+            # If the user clicks "No", close the session and exit the function safely
+            if not confirm:
+                session.close()
+                return
+
+                # --- REST OF YOUR WORKING STOP LOGIC ---
             # Calculate total up to this exact millisecond
             elapsed = datetime.now() - item.start_time
             total_seconds = int(elapsed.total_seconds())
@@ -239,6 +336,7 @@ def open_details_window(item_id, main_img_label):
             # UNLOCK UI selection fields for the next round
             for btn in selection_buttons:
                 btn.config(state="normal")
+
         session.close()
 
     # --- AUTO-LOCK IF ALREADY RUNNING ---
@@ -262,6 +360,20 @@ def open_details_window(item_id, main_img_label):
     # --- CLEANUP ---
     def on_close():
         state["window_active"] = False
+
+        session = Session()
+        item = session.query(Item).get(item_id)
+
+        # Only clear the drink tab if the timer is NOT running
+        if item and not item.is_running:
+            try:
+                session.query(ConsoleOrder).filter_by(item_id=item_id).delete()
+                session.commit()
+            except Exception as e:
+                print(f"Error clearing drink tab: {e}")
+                session.rollback()
+
+        session.close()
         details_window.destroy()
 
     details_window.protocol("WM_DELETE_WINDOW", on_close)
